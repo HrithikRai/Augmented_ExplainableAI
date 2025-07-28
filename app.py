@@ -6,7 +6,6 @@ from lime.lime_tabular import LimeTabularExplainer
 import shap
 from scipy.stats import entropy
 from openai import OpenAI
-import matplotlib.pyplot as plt
 from utils.helper_functions import Loader
 
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
@@ -20,36 +19,39 @@ loader.preprocess()
 X_train, X_test, y_train, y_test = loader.get_data_split()
 X_train_np, X_test_np = X_train.values, X_test.values
 
-# Prediction function
 def predict_fn(x):
     preds = model.predict(x)
     return np.concatenate([(1 - preds), preds], axis=1)
 
-# CIA score functions
+# Interpretability metric
 def interpretability_score(imp_dict):
     vals = np.abs(list(imp_dict.values()))
     probs = vals / np.sum(vals)
     return 1 - entropy(probs) / np.log(len(probs))
 
+# CIA Score computation
 def calculate_cia(instance_np, shap_dict, lime_dict, model):
     pred_prob = model.predict(instance_np.reshape(1, -1))[0][0]
     confidence = max(pred_prob, 1 - pred_prob)
     interp_shap = interpretability_score(shap_dict)
     interp_lime = interpretability_score(lime_dict)
     interp_avg = (interp_shap + interp_lime) / 2
+
     k = 10
     top_shap = list(dict(sorted(shap_dict.items(), key=lambda x: abs(x[1]), reverse=True)).keys())[:k]
     top_lime = list(dict(sorted(lime_dict.items(), key=lambda x: abs(x[1]), reverse=True)).keys())[:k]
     jaccard = len(set(top_shap) & set(top_lime)) / len(set(top_shap) | set(top_lime))
+
     α, β, γ = 0.4, 0.3, 0.3
     cia_score = α * confidence + β * interp_avg + γ * jaccard
+
     return pred_prob, confidence, interp_avg, jaccard, cia_score, top_shap, top_lime
 
-# Sidebar
+# UI
 st.sidebar.title("🔍 Explainable AI Interface")
 instance_index = st.sidebar.slider("Select Instance Index", 0, len(X_test) - 1, 12)
 
-# Instance Selection
+# Instance selection
 instance_np = X_test_np[instance_index]
 instance_df = X_test.iloc[[instance_index]]
 
@@ -75,39 +77,72 @@ pred_prob, confidence, interp_avg, jaccard, cia_score, top_shap, top_lime = calc
     instance_np, shap_feat_importance, lime_feat_importance, model
 )
 
-# Title and Prediction
+# Display
 st.title("🧠 Explainable AI Dashboard")
+
 st.markdown(f"""
-- 🧬 **Instance Index**: `{instance_index}`
-- 📊 **Model Prediction**: `{pred_prob:.2f}` → {'Risky' if pred_prob > 0.5 else 'Healthy'}
-- ✅ **Confidence**: `{confidence:.2f}`
-- 🔍 **Interpretability (Avg of SHAP & LIME)**: `{interp_avg:.2f}`
-- 🤝 **SHAP-LIME Agreement**: `{jaccard:.2f}`
-- 🧪 **CIA Trust Score**: `{cia_score:.2f}` _(0=Untrustworthy, 1=Very Trustworthy)_
+## 📊 Prediction Summary:
+- **Instance Index**: `{instance_index}`
+- **Predicted Class**: `{'Risky' if pred_prob > 0.5 else 'Healthy'}`
+- **Prediction Probability**: `{pred_prob:.2f}`
+- **Confidence**: `{confidence:.2f}`
+- **Interpretability (Avg SHAP + LIME)**: `{interp_avg:.2f}`
+- **SHAP-LIME Feature Agreement (Jaccard)**: `{jaccard:.2f}`
+- **CIA Trust Score**: `{cia_score:.2f}` _(0 = Untrustworthy, 1 = Very Trustworthy)_
 """)
 
-# Visualizations
+# SHAP Plot
 st.subheader("📈 SHAP Feature Importances")
 shap_df = pd.DataFrame(shap_feat_importance.items(), columns=["Feature", "Importance"])
 shap_df = shap_df.reindex(shap_df.Importance.abs().sort_values(ascending=False).index)
 st.bar_chart(shap_df.set_index("Feature"))
 
+# LIME Plot
 st.subheader("📈 LIME Feature Importances")
 lime_df = pd.DataFrame(lime_feat_importance.items(), columns=["Feature", "Importance"])
 lime_df = lime_df.reindex(lime_df.Importance.abs().sort_values(ascending=False).index)
 st.bar_chart(lime_df.set_index("Feature"))
 
-# Chatbot (Optional OpenAI/Custom Agent)
+# Chatbot with structured prompt
 st.subheader("💬 AI Explanation Chat")
 user_prompt = st.text_input("Ask something about this prediction...")
+
 if user_prompt:
+    # Clean instance values for readability
+    instance_data = instance_df.iloc[0].to_dict()
+    formatted_features = "\n".join([f"- {k}: {v}" for k, v in instance_data.items()])
+    formatted_shap = "\n".join([f"- {k}: {v:.4f}" for k, v in shap_feat_importance.items()])
+    formatted_lime = "\n".join([f"- {k}: {v:.4f}" for k, v in lime_feat_importance.items()])
+
+    system_message = "You are a medical AI assistant and machine learning model explainer. Your job is to explain the model’s prediction, important features, and give clear, human-understandable insight."
+    
+    full_prompt = f"""
+🧬 **Instance Data:**
+{formatted_features}
+
+📊 **Model Prediction:**
+- Probability: {pred_prob:.2f}
+- Class: {"Risky" if pred_prob > 0.5 else "Healthy"}
+- Confidence: {confidence:.2f}
+
+📌 **SHAP Explanation:**
+{formatted_shap}
+
+📌 **LIME Explanation:**
+{formatted_lime}
+
+🔍 **CIA Trust Score**: {cia_score:.2f}
+🔗 **SHAP-LIME Agreement (Jaccard)**: {jaccard:.2f}
+
+❓ **User Query**: {user_prompt}
+"""
+
     response = client.chat.completions.create(
         model="gpt-4",
         messages=[
-            {"role": "system", "content": "You're an AI doctor and model explainer."},
-            {"role": "user", "content": f"Explain this instance: {instance_df.to_dict()}"},
-            {"role": "user", "content": user_prompt}
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": full_prompt}
         ]
     )
-    st.markdown("**AI Response:**")
+    st.markdown("**🧠 AI Explanation:**")
     st.write(response.choices[0].message.content)
