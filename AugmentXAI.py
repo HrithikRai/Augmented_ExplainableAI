@@ -41,32 +41,23 @@ exp = explainer_lime.explain_instance(
     num_features=15
 )
 
-exp.show_in_notebook()
+# exp.show_in_notebook()
 for feature, weight in exp.as_list():
     print(f"{feature}: {weight:.4f}")
 
 # %% SHAP Explainer
-# Initialize SHAP's JS visualization
 shap.initjs()
 
-# Predict function that outputs probabilities
-# (Assumes you’ve defined this already)
-# predict_fn = lambda x: model.predict(x)
-
-# ⚙️ Build KernelExplainer (only once, and reuse it!)
 kernel_explainer = shap.KernelExplainer(predict_fn, X_test.iloc[:50, :])
 
-# 🔍 Pick any instance index (e.g., 299)
-instance_idx = 299
+instance_idx = 0
 X_instance = X_test.iloc[instance_idx:instance_idx+1]
 
-# 🔁 Compute SHAP values for that instance
 shap_values = kernel_explainer(X_instance)
 
-# 🎯 Choose class index (for binary: 0 or 1)
 class_idx = 1
 
-# ✅ Plot SHAP force plot
+# Plot SHAP force plot
 shap.plots.force(
     base_value=shap_values.base_values[0, class_idx],
     shap_values=shap_values.values[0, :, class_idx],
@@ -74,4 +65,5 @@ shap.plots.force(
     feature_names=X_test.columns,
     matplotlib=True  # static plot for Jupyter/IDE
 )
+
 
