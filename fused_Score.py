@@ -4,9 +4,7 @@ import pandas as pd
 from keras.models import load_model
 from lime.lime_tabular import LimeTabularExplainer
 import shap
-from sklearn.metrics import log_loss
-from sklearn.preprocessing import MinMaxScaler
-from scipy.stats import entropy, kendalltau
+from scipy.stats import entropy
 
 # %% Load model and data
 from utils.helper_functions import Loader

@@ -6,3 +6,9 @@ tensorflow
 seaborn
 shap
 lime
+streamlit
+dotenv
+langchain
+langchain_community
+openai==0.28
+scipy
